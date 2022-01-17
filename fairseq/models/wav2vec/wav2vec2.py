@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from fairseq import utils
+from fairseq import utils, checkpoint_utils
 from fairseq.data.data_utils import compute_mask_indices
 from fairseq.dataclass import ChoiceEnum, FairseqDataclass
 from fairseq.models import BaseFairseqModel, register_model
@@ -54,6 +54,17 @@ class Wav2Vec2Config(FairseqDataclass):
     )
     encoder_ffn_embed_dim: int = field(
         default=3072, metadata={"help": "encoder embedding dimension for FFN"}
+    )
+    bottleneck_dim: int = field(
+        default=0, metadata={"help": "bottleneck dimension for residual adapter"}
+    )
+    use_first_adapter: bool = field(
+        default=True,
+        metadata={"help": "the position of adapter"}
+    )
+    adapter_before_quant: bool = field(
+        default=False,
+        metadata={"help": "the position of adapter"}
     )
     encoder_attention_heads: int = field(
         default=12, metadata={"help": "num encoder attention heads"}
@@ -250,6 +261,22 @@ class Wav2Vec2Config(FairseqDataclass):
             "help": "crop convolutional feature extractor output such that the sequence length is divisible by multiple"
         },
     )
+    freeze_adapter: bool = field(
+        default=False,
+        metadata={"help": "freeze paramters in adapters or not"},
+    )
+    freeze_backbone: bool = field(
+        default=False,
+        metadata={"help": "freeze backbone parameters or not"},
+    )
+    no_pretrained_weights: bool = field(
+        default=True,
+        metadata={"help": "load pretrained wav2vec2 model"},
+    )
+    pretrained_weights_path: str = field(
+        default='',
+        metadata={"help": "path"},
+    )
 
 
 @register_model("wav2vec2", dataclass=Wav2Vec2Config)
@@ -347,6 +374,12 @@ class Wav2Vec2Model(BaseFairseqModel):
         self.mask_emb = nn.Parameter(
             torch.FloatTensor(cfg.encoder_embed_dim).uniform_()
         )
+        
+        if cfg.bottleneck_dim > 0 and cfg.use_first_adapter and cfg.adapter_before_quant:
+            self.bottleneck_dim = cfg.bottleneck_dim
+            self.res_adapter = ResAdapter(self.embed, self.bottleneck_dim, cfg.dropout, cfg.layer_norm_first)
+        else:
+            self.res_adapter = None
 
         self.encoder = TransformerEncoder(cfg)
         self.layer_norm = LayerNorm(self.embed)
@@ -358,6 +391,31 @@ class Wav2Vec2Model(BaseFairseqModel):
             )
 
         self.final_proj = nn.Linear(cfg.encoder_embed_dim, final_dim)
+
+        self.load_pretrained_weights(cfg)
+        if cfg.freeze_adapter:
+            self.freeze_adapter()
+        if cfg.freeze_backbone:
+            self.freeze_backbone()
+
+    def load_pretrained_weights(self, cfg):
+        if not cfg.no_pretrained_weights:
+            print("load pretrained w2v model from {}".format(cfg.pretrained_weights_path))
+            arg_overrides = {}
+            state = checkpoint_utils.load_checkpoint_to_cpu(cfg.pretrained_weights_path, arg_overrides)
+            self.load_state_dict(state["model"], strict=False)
+
+    def freeze_adapter(self):
+        self.encoder.freeze_adapter()
+        if self.res_adapter is not None:
+            self.res_adapter.freeze_adapter()
+
+    def freeze_backbone(self):
+        for name, p in self.named_parameters():
+            if not name.startswith('res_adapter') and not name.startswith('encoder'):
+                p.requires_grad = False
+
+        self.encoder.freeze_backbone()
 
     def upgrade_state_dict_named(self, state_dict, name):
         super().upgrade_state_dict_named(state_dict, name)
@@ -559,6 +617,10 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         features = features.transpose(1, 2)
         features = self.layer_norm(features)
+
+        if self.res_adapter is not None:
+            features = self.res_adapter(features)
+
         unmasked_features = features.clone()
 
         if padding_mask is not None and padding_mask.any():
@@ -770,6 +832,7 @@ class ConvFeatureExtractionModel(nn.Module):
         dropout: float = 0.0,
         mode: str = "default",
         conv_bias: bool = False,
+    
     ):
         super().__init__()
 
@@ -867,11 +930,18 @@ class TransformerEncoder(nn.Module):
         self.pos_conv = nn.utils.weight_norm(self.pos_conv, name="weight", dim=2)
         self.pos_conv = nn.Sequential(self.pos_conv, SamePad(args.conv_pos), nn.GELU())
 
+        if args.bottleneck_dim > 0 and args.use_first_adapter and not args.adapter_before_quant:
+            self.bottleneck_dim = args.bottleneck_dim
+            self.res_adapter = ResAdapter(self.embedding_dim, self.bottleneck_dim, self.dropout, args.layer_norm_first)
+        else:
+            self.res_adapter = None
+
         layers = []
         for _ in range(args.encoder_layers):
             layer = TransformerSentenceEncoderLayer(
                 embedding_dim=self.embedding_dim,
                 ffn_embedding_dim=args.encoder_ffn_embed_dim,
+                bottleneck_dim=args.bottleneck_dim,
                 num_attention_heads=args.encoder_attention_heads,
                 dropout=self.dropout,
                 attention_dropout=args.attention_dropout,
@@ -890,6 +960,21 @@ class TransformerEncoder(nn.Module):
         self.layerdrop = args.encoder_layerdrop
 
         self.apply(init_bert_params)
+
+    def freeze_adapter(self):
+        if self.res_adapter is not None:
+            self.res_adapter.freeze_adapter()
+
+        for layer in self.layers:
+            layer.freeze_adapter()
+
+    def freeze_backbone(self):
+        for name, p in self.named_parameters():
+            if not name.startswith("res_adapter") and not name.startswith("layers"):
+                p.requires_grad = False
+
+        for layer in self.layers:
+            layer.freeze_backbone()
 
     def forward(self, x, padding_mask=None, layer=None):
         x, layer_results = self.extract_features(x, padding_mask, layer)
@@ -926,6 +1011,9 @@ class TransformerEncoder(nn.Module):
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
+
+        if self.res_adapter is not None:
+            x = self.res_adapter(x)
 
         layer_results = []
         r = None
@@ -980,6 +1068,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
         self,
         embedding_dim: float = 768,
         ffn_embedding_dim: float = 3072,
+        bottleneck_dim: float=0,
         num_attention_heads: float = 8,
         dropout: float = 0.1,
         attention_dropout: float = 0.1,
@@ -1016,6 +1105,10 @@ class TransformerSentenceEncoderLayer(nn.Module):
 
         # layer norm associated with the position wise feed-forward NN
         self.final_layer_norm = LayerNorm(self.embedding_dim)
+
+        self.bottleneck_dim = bottleneck_dim
+        if bottleneck_dim > 0:
+            self.res_adapter = ResAdapter(embedding_dim, bottleneck_dim, dropout, layer_norm_first)
 
     def forward(
         self,
@@ -1071,4 +1164,59 @@ class TransformerSentenceEncoderLayer(nn.Module):
             x = residual + x
             x = self.final_layer_norm(x)
 
+        if self.bottleneck_dim > 0:
+            x = self.res_adapter(x)
+
         return x, attn
+
+    def freeze_adapter(self):
+        self.res_adapter.freeze_adapter()
+
+    def freeze_backbone(self):
+        for name, p in self.named_parameters():
+            if not name.startswith('res_adapter'):
+                p.requires_grad = False
+
+class ResAdapter(nn.Module):
+    "Residual adapters."
+    def __init__(self, 
+        embedding_dim: float = 768, 
+        bottleneck_dim: float = 1024,
+        dropout: float = 0.1, 
+        layer_norm_first: bool = False,
+    ) -> None:
+
+        super(ResAdapter, self).__init__()
+        self.adapter = nn.Sequential(nn.Linear(embedding_dim, bottleneck_dim), 
+                                      nn.ReLU(),
+                                      nn.Linear(bottleneck_dim, embedding_dim))
+        
+        self.dropout = nn.Dropout(dropout)
+        self.layer_norm_first = layer_norm_first
+        self.adapter_layer_norm = LayerNorm(embedding_dim)
+
+        self.size = bottleneck_dim
+
+    def forward(
+        self, 
+        x: torch.Tensor,
+    ):
+        
+        residual = x
+        
+        if self.layer_norm_first:
+            x = self.adapter_layer_norm(x)
+            x = self.adapter(x)
+            x = self.dropout(x)
+            x = residual + x
+        else:
+            x = self.adapter(x)
+            x = self.dropout(x)
+            x = residual + x
+            x = self.adapter_layer_norm(x)
+
+        return x
+
+    def freeze_adapter(self):
+        for name, p in self.named_parameters():
+            p.requires_grad = False

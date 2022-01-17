@@ -26,6 +26,9 @@ class HubertAsrConfig(FairseqDataclass):
         default=False,
         metadata={"help": "if true, does not load pretrained weights"},
     )
+    bottleneck_dim: int = field(
+        default=0, metadata={"help": "bottleneck dimension for residual adapter"}
+    )
     dropout_input: float = field(
         default=0.0,
         metadata={"help": "dropout to apply to the input (after feat extr)"},
@@ -49,6 +52,22 @@ class HubertAsrConfig(FairseqDataclass):
         metadata={
             "help": "dropout probability after activation in FFN " "inside hubert model"
         },
+    )
+    freeze_adapter: bool = field(
+        default=False,
+        metadata={"help": "freeze paramters in adapters or not"},
+    )
+    freeze_backbone: bool = field(
+        default=False,
+        metadata={"help": "freeze backbone parameters or not"},
+    )
+    use_first_adapter: bool = field(
+        default=True,
+        metadata={"help": "the position of adapter"},
+    )
+    adapter_before_quant: bool = field(
+        default=False,
+        metadata={"help": "the position of adapter"},
     )
 
     # masking
@@ -147,9 +166,11 @@ class HubertCtc(BaseFairseqModel):
         return cls(cfg, w2v_encoder)
 
     def get_normalized_probs(self, net_output, log_probs):
+        #import pdb
+        #pdb.set_trace()
         """Get normalized probabilities (or log probs) from a net's output."""
 
-        logits = net_output["encoder_out"]
+        logits = self.get_logits(net_output) #net_output["encoder_out"]
         if log_probs:
             return utils.log_softmax(logits.float(), dim=-1)
         else:
@@ -159,9 +180,15 @@ class HubertCtc(BaseFairseqModel):
         logits = net_output["encoder_out"]
         padding = net_output["encoder_padding_mask"]
         if padding is not None and padding.any():
-            padding = padding.T
-            logits[padding][..., 0] = 0
-            logits[padding][..., 1:] = float("-inf")
+            number_of_classes = logits.size(-1)
+            masking_tensor = torch.ones(
+                number_of_classes, device=logits.device
+            ) * float("-inf")
+            masking_tensor[0] = 0
+            logits[padding.T] = masking_tensor.type_as(logits)
+            #padding = padding.T
+            #logits[padding][..., 0] = 0
+            #logits[padding][..., 1:] = float("-inf")
 
         return logits
 
@@ -244,6 +271,11 @@ class HubertEncoder(FairseqEncoder):
             "no_mask_channel_overlap": cfg.no_mask_channel_overlap,
             "encoder_layerdrop": cfg.layerdrop,
             "feature_grad_mult": cfg.feature_grad_mult,
+            "bottleneck_dim": cfg.bottleneck_dim,
+            "freeze_adapter": cfg.freeze_adapter,
+            "freeze_backbone": cfg.freeze_backbone,
+            "use_first_adapter": cfg.use_first_adapter,
+            "adapter_before_quant": cfg.adapter_before_quant,
         }
 
         if cfg.w2v_args is None:
@@ -272,8 +304,9 @@ class HubertEncoder(FairseqEncoder):
         model = task.build_model(w2v_args.model)
 
         if state is not None and not cfg.no_pretrained_weights:
+            print("load pretrained hubert model from {}".format(cfg.w2v_path))
             # set strict=False because we omit some modules
-            model.load_state_dict(state["model"], strict=False)
+            model.load_state_dict(state["model"], False)
 
         model.remove_pretraining_modules()
 

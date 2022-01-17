@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from omegaconf import II
 
-from fairseq import utils
+from fairseq import utils, checkpoint_utils
 from fairseq.data.data_utils import compute_mask_indices
 from fairseq.data.dictionary import Dictionary
 from fairseq.dataclass import ChoiceEnum, FairseqDataclass
@@ -20,6 +20,7 @@ from fairseq.models import BaseFairseqModel, register_model
 from fairseq.models.wav2vec.wav2vec2 import (
     ConvFeatureExtractionModel,
     TransformerEncoder,
+    ResAdapter
 )
 from fairseq.modules import GradMultiply, LayerNorm
 from fairseq.tasks.hubert_pretraining import (
@@ -53,6 +54,17 @@ class HubertConfig(FairseqDataclass):
     )
     encoder_ffn_embed_dim: int = field(
         default=3072, metadata={"help": "encoder embedding dimension for FFN"}
+    )
+    bottleneck_dim: int = field(
+        default=0, metadata={"help": "bottleneck dimension for residual adapter"}
+    )
+    use_first_adapter: bool = field(
+        default=True,
+        metadata={"help": "the position of adapter"},
+    )
+    adapter_before_quant: bool = field(
+        default=False,
+        metadata={"help": "the position of adapter"}
     )
     encoder_attention_heads: int = field(
         default=12, metadata={"help": "num encoder attention heads"}
@@ -208,6 +220,30 @@ class HubertConfig(FairseqDataclass):
         default=False,
         metadata={"help": "recompute activations and save memory for extra compute"},
     )
+    
+    # FP16 optimization
+    required_seq_len_multiple: int = field(
+        default=1,
+        metadata={
+            "help": "pad the input to encoder such that the sequence length is divisible by multiple"
+        },
+    )
+    freeze_adapter: bool = field(
+        default=False,
+        metadata={"help": "freeze paramters in adapters or not"},
+    )
+    freeze_backbone: bool = field(
+        default=False,
+        metadata={"help": "freeze backbone parameters or not"},
+    )
+    no_pretrained_weights: bool = field(
+        default=True,
+        metadata={"help": "load pretrained wav2vec2 model"},
+    )
+    pretrained_weights_path: str = field(
+        default='',
+        metadata={"help": "path"},
+    )
 
 
 @register_model("hubert", dataclass=HubertConfig)
@@ -267,6 +303,12 @@ class HubertModel(BaseFairseqModel):
             torch.FloatTensor(cfg.encoder_embed_dim).uniform_()
         )
 
+        if cfg.bottleneck_dim > 0 and cfg.use_first_adapter and cfg.adapter_before_quant:
+            self.bottleneck_dim = cfg.bottleneck_dim
+            self.res_adapter = ResAdapter(self.embed, self.bottleneck_dim, cfg.dropout, cfg.layer_norm_first)
+        else:
+            self.res_adapter = None
+
         self.encoder = TransformerEncoder(cfg)
         self.layer_norm = LayerNorm(self.embed)
 
@@ -293,6 +335,33 @@ class HubertModel(BaseFairseqModel):
                 torch.FloatTensor(sum(self.num_classes), final_dim)
             )
             nn.init.uniform_(self.label_embs_concat)
+
+        self.load_pretrained_weights(cfg)
+        if cfg.freeze_adapter:
+            self.freeze_adapter()
+        if cfg.freeze_backbone:
+            self.freeze_backbone()
+
+    def load_pretrained_weights(self, cfg):
+        if not cfg.no_pretrained_weights:
+            print("load pretrained w2v model from {}".format(cfg.pretrained_weights_path))
+            arg_overrides = {}
+            state = checkpoint_utils.load_checkpoint_to_cpu(cfg.pretrained_weights_path, arg_overrides)
+            self.load_state_dict(state["model"], strict=False)
+
+    def freeze_adapter(self):
+        self.encoder.freeze_adapter()
+        if self.res_adapter is not None:
+            self.res_adapter.freeze_adapter()
+
+    def freeze_backbone(self):
+        for name, p in self.named_parameters():
+            if not name.startswith('res_adapter') and not name.startswith('encoder'):
+                p.requires_grad = False
+            if name.startswith('label_embs_concat') or name.startswith("target_glu") or name.startswith("final_proj"):
+               p.requires_grad = True
+
+        self.encoder.freeze_backbone()
 
     def upgrade_state_dict_named(self, state_dict, name):
         """Upgrade a (possibly old) state dict for new versions of fairseq."""
@@ -414,6 +483,10 @@ class HubertModel(BaseFairseqModel):
 
         features = features.transpose(1, 2)
         features = self.layer_norm(features)
+
+        if self.res_adapter is not None:
+            features = self.res_adapter(features)
+
         unmasked_features = features.clone()
 
         if padding_mask is not None:

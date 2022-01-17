@@ -19,16 +19,17 @@ task:
   labels: ltr
 
 dataset:
-  num_workers: 6
+  num_workers: 0 #6
   max_tokens: 3200000
   skip_invalid_size_inputs_valid_test: true
   validate_after_updates: 10000
   validate_interval: 50
-  valid_subset: dev_other
+  train_subset: train
+  valid_subset: valid
 
 distributed_training:
   ddp_backend: legacy_ddp
-  distributed_world_size: 2
+  distributed_world_size: 1
 
 criterion:
   _name: ctc
@@ -61,3 +62,6 @@ model:
   activation_dropout: 0.1
   feature_grad_mult: 0.0
   freeze_finetune_updates: 10000
+  bottleneck_dim: ???
+  freeze_adapter: ???
+  freeze_backbone: ???

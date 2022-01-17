@@ -66,6 +66,26 @@ class Wav2Vec2AsrConfig(FairseqDataclass):
             "help": "dropout probability after activation in FFN inside wav2vec 2.0 model"
         },
     )
+    bottleneck_dim: int = field(
+        default=0, metadata={"help": "bottleneck dimension for residual adapter"}
+    )
+    use_first_adapter: bool = field(
+        default=True,
+        metadata={"help": "the position of adapter"},
+    )
+    adapter_before_quant: bool = field(
+        default=False,
+        metadata={"help": "the position of adapter"},
+    )
+
+    freeze_adapter: bool = field(
+        default=False,
+        metadata={"help": "freeze paramters in adapters or not"},
+    )
+    freeze_backbone: bool = field(
+        default=False,
+        metadata={"help": "freeze backbone parameters or not"},
+    )
     conv_feature_layers: Optional[str] = field(
         default="[(512, 10, 5)] + [(512, 3, 2)] * 4 + [(512,2,2)] + [(512,2,2)]",
         metadata={
@@ -341,6 +361,11 @@ class Wav2VecEncoder(FairseqEncoder):
             "no_mask_channel_overlap": cfg.no_mask_channel_overlap,
             "encoder_layerdrop": cfg.layerdrop,
             "feature_grad_mult": cfg.feature_grad_mult,
+            "bottleneck_dim": cfg.bottleneck_dim,
+            "freeze_adapter": cfg.freeze_adapter,
+            "freeze_backbone": cfg.freeze_backbone,
+            "use_first_adapter": cfg.use_first_adapter,
+            "adapter_before_quant": cfg.adapter_before_quant,
         }
 
         if cfg.w2v_args is None:
@@ -371,6 +396,7 @@ class Wav2VecEncoder(FairseqEncoder):
         model = task.build_model(w2v_args.model)
 
         if state is not None and not cfg.no_pretrained_weights:
+            print("Load pretrained weights from {}".format(cfg.w2v_path))
             self.load_model_weights(state, model, cfg)
 
         model.remove_pretraining_modules()
@@ -424,6 +450,8 @@ class Wav2VecEncoder(FairseqEncoder):
             }
 
             model.load_state_dict(new_big_dict, strict=False)
+        elif cfg.bottleneck_dim > 0:
+            model.load_state_dict(state["model"], strict=False)
         else:
             model.load_state_dict(state["model"], strict=True)
 
