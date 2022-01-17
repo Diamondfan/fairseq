@@ -141,8 +141,13 @@ class S2TDataConfig(object):
         return self._auto_convert_to_abs_path(path)
 
     @property
-    def vocoder(self) -> Optional[Dict[str, str]]:
-        return self.config.get("vocoder", None)
+    def vocoder(self) -> Dict[str, str]:
+        vocoder = self.config.get("vocoder", {"type": "griffin_lim"})
+        return self._auto_convert_to_abs_path(vocoder)
+
+    @property
+    def hub(self) -> Dict[str, str]:
+        return self.config.get("hub", {})
 
 
 class S2SDataConfig(S2TDataConfig):
@@ -249,9 +254,8 @@ class SingleTaskConfig(object):
         if self.input_from == "decoder":
             return self.config["decoder_layer"] - 1
         else:
-            # default using the output from the last encoder layer
-            # TODO: check if need to offset by 1
-            return self.config.get("encoder_layer", -1)
+            # default using the output from the last encoder layer (-1)
+            return self.config.get("encoder_layer", 0) - 1
 
     @property
     def loss_weight_schedule(self):
