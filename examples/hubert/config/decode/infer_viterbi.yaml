@@ -25,6 +25,6 @@ common_eval:
   path: ???
   post_process: letter
 dataset:
-  max_tokens: 1100000
+  max_tokens: 2400000
   gen_subset: ???
   batch_size: 1

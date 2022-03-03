@@ -336,6 +336,11 @@ class HubertModel(BaseFairseqModel):
             )
             nn.init.uniform_(self.label_embs_concat)
 
+        # Add init to prevent nan for inserted residual adapters
+        for p in self.parameters():
+            if p.dim() > 1: 
+                nn.init.xavier_uniform_(p)
+
         self.load_pretrained_weights(cfg)
         if cfg.freeze_adapter:
             self.freeze_adapter()
@@ -359,7 +364,8 @@ class HubertModel(BaseFairseqModel):
             if not name.startswith('res_adapter') and not name.startswith('encoder'):
                 p.requires_grad = False
             if name.startswith('label_embs_concat') or name.startswith("target_glu") or name.startswith("final_proj"):
-               p.requires_grad = True
+                print('unfreeze {}'.format(name))
+                p.requires_grad = True
 
         self.encoder.freeze_backbone()
 
