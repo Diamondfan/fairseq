@@ -364,7 +364,6 @@ class HubertModel(BaseFairseqModel):
             if not name.startswith('res_adapter') and not name.startswith('encoder'):
                 p.requires_grad = False
             if name.startswith('label_embs_concat') or name.startswith("target_glu") or name.startswith("final_proj"):
-                print('unfreeze {}'.format(name))
                 p.requires_grad = True
 
         self.encoder.freeze_backbone()

@@ -391,6 +391,11 @@ class Wav2Vec2Model(BaseFairseqModel):
             )
 
         self.final_proj = nn.Linear(cfg.encoder_embed_dim, final_dim)
+        
+        # Add init to prevent nan for inserted residual adapters
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
 
         # Add init to prevent nan for inserted residual adapters
         for p in self.parameters():
@@ -1114,6 +1119,8 @@ class TransformerSentenceEncoderLayer(nn.Module):
         self.bottleneck_dim = bottleneck_dim
         if bottleneck_dim > 0:
             self.res_adapter = ResAdapter(embedding_dim, bottleneck_dim, dropout, layer_norm_first)
+        else:
+            self.res_adapter = None
 
     def forward(
         self,
@@ -1175,7 +1182,8 @@ class TransformerSentenceEncoderLayer(nn.Module):
         return x, attn
 
     def freeze_adapter(self):
-        self.res_adapter.freeze_adapter()
+        if self.res_adapter is not None:
+            self.res_adapter.freeze_adapter()
 
     def freeze_backbone(self):
         for name, p in self.named_parameters():

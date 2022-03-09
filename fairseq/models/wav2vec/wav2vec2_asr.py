@@ -190,6 +190,33 @@ class Wav2Vec2AsrConfig(FairseqDataclass):
         metadata={"help": "recompute activations and save memory for extra compute"},
     )
     ddp_backend: str = II("distributed_training.ddp_backend")
+    
+    final_layer_type: str = field(
+        default="Linear",
+        metadata={"help":"final layer type"},
+    )
+    
+    lstm_dim: int = field(
+        default=1024, metadata={"help": "lstm dimension for final layer"}
+    )
+    lstm_num_layer: int = field(
+        default=2, metadata={"help": "number of layers of final LSTM module"}
+    )
+    lstm_bidirection: bool = field(
+        default=True, metadata={"help":"bidirectional LSTM or not"}
+    )
+    lstm_module: str = field(
+        default="lstm", metadata={"help": "rnn type, lstm, rnn, gru"}
+    )
+    lstm_add_norm: bool = field(
+        default=False, metadata={"help": "use layer norm in final layer or not"}
+    )
+    lstm_add_prob: bool = field(
+        default=False, metadata={"help": "add proj in final lstm module or not"}
+    )
+    lstm_dropout: float = field(
+        default=0.2, metadata={"help": "dropout in lstm module"}
+    )
 
 
 @dataclass
@@ -352,6 +379,64 @@ class Wav2Vec2Seq2SeqModel(FairseqEncoderDecoderModel):
         super().upgrade_state_dict_named(state_dict, name)
         return state_dict
 
+class RNNLayer(nn.Module):
+    def __init__(self, input_dim, hidden_dim, module, bidirection, dropout, add_proj=False, add_norm=False):
+        super(RNNLayer, self).__init__()
+        self.layer = getattr(nn, module.upper())(input_dim, hidden_dim, bidirectional=bidirection, num_layers=1, batch_first=True)
+        out_dim = 2 * hidden_dim if bidirection else hidden_dim
+
+        self.out_dim = out_dim
+        self.add_norm = add_norm
+        self.add_proj = add_proj
+
+        if add_norm:
+            self.norm = LayerNorm(out_dim)
+        self.dropout = nn.Dropout(p=dropout)
+
+        if self.add_proj:
+            self.proj = nn.Linear(out_dim, out_dim)
+
+    def forward(self, x): 
+        x, _ = self.layer(x)
+    
+        if self.add_norm:
+            x = self.norm(x)
+    
+        x = self.dropout(x)
+
+        if self.add_proj:
+            x = self.proj(x)
+
+        return x
+
+class LSTMGenerator(nn.Module):
+    "Using SSL as feature extractor"
+    def __init__(self, d_input, vocab, cfg):
+        super(LSTMGenerator, self).__init__()
+        rnn_input = d_input
+        d_lstm = cfg.lstm_dim
+        num_layer = cfg.lstm_num_layer
+        bidirection = cfg.lstm_bidirection
+        module = cfg.lstm_module
+        add_norm = cfg.lstm_add_norm
+        add_proj = cfg.lstm_add_prob
+        dropout = cfg.lstm_dropout
+
+        self.layers = nn.ModuleList()
+        for i in range(num_layer):
+            rnn_layer = RNNLayer(rnn_input, d_lstm, module, bidirection, dropout, add_proj, add_norm)
+            self.layers.append(rnn_layer)
+            rnn_input = rnn_layer.out_dim
+
+        self.final_layer = Linear(rnn_input, vocab)
+
+    def forward(self, x, T=1.0):
+        x = x.transpose(0, 1)
+        for layer in self.layers:
+            x = layer(x)
+        output = self.final_layer(x)
+        return output.transpose(0, 1)
+
 
 class Wav2VecEncoder(FairseqEncoder):
     def __init__(self, cfg: Wav2Vec2AsrConfig, output_size=None):
@@ -438,7 +523,12 @@ class Wav2VecEncoder(FairseqEncoder):
             targ_d = cfg.decoder_embed_dim
 
         if targ_d is not None:
-            self.proj = Linear(d, targ_d)
+            if cfg.final_layer_type == "Linear":
+                self.proj = Linear(d, targ_d)
+            elif cfg.final_layer_type == "LSTM":
+                self.proj = LSTMGenerator(d, targ_d, cfg)
+            else:
+                raise NotImplementedError
 
     def load_model_weights(self, state, model, cfg):
         if cfg.ddp_backend == "fully_sharded":
