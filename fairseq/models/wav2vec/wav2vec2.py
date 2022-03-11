@@ -392,16 +392,6 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         self.final_proj = nn.Linear(cfg.encoder_embed_dim, final_dim)
         
-        # Add init to prevent nan for inserted residual adapters
-        for p in self.parameters():
-            if p.dim() > 1:
-                nn.init.xavier_uniform_(p)
-
-        # Add init to prevent nan for inserted residual adapters
-        for p in self.parameters():
-            if p.dim() > 1: 
-                nn.init.xavier_uniform_(p)
-
         self.load_pretrained_weights(cfg)
         if cfg.freeze_adapter:
             self.freeze_adapter()
@@ -411,6 +401,11 @@ class Wav2Vec2Model(BaseFairseqModel):
     def load_pretrained_weights(self, cfg):
         if not cfg.no_pretrained_weights:
             print("load pretrained w2v model from {}".format(cfg.pretrained_weights_path))
+            # Add init to prevent nan for inserted residual adapters
+            for p in self.parameters():
+                if p.dim() > 1:
+                    nn.init.xavier_uniform_(p)
+
             arg_overrides = {}
             state = checkpoint_utils.load_checkpoint_to_cpu(cfg.pretrained_weights_path, arg_overrides)
             self.load_state_dict(state["model"], strict=False)

@@ -382,7 +382,7 @@ class Wav2Vec2Seq2SeqModel(FairseqEncoderDecoderModel):
 class RNNLayer(nn.Module):
     def __init__(self, input_dim, hidden_dim, module, bidirection, dropout, add_proj=False, add_norm=False):
         super(RNNLayer, self).__init__()
-        self.layer = getattr(nn, module.upper())(input_dim, hidden_dim, bidirectional=bidirection, num_layers=1, batch_first=True)
+        self.layer = getattr(nn, module.upper())(input_dim, hidden_dim, bidirectional=bidirection, num_layers=1, batch_first=False)
         out_dim = 2 * hidden_dim if bidirection else hidden_dim
 
         self.out_dim = out_dim
@@ -428,14 +428,13 @@ class LSTMGenerator(nn.Module):
             self.layers.append(rnn_layer)
             rnn_input = rnn_layer.out_dim
 
-        self.final_layer = Linear(rnn_input, vocab)
+        self.final_layer = nn.Linear(rnn_input, vocab)
 
     def forward(self, x, T=1.0):
-        x = x.transpose(0, 1)
         for layer in self.layers:
             x = layer(x)
         output = self.final_layer(x)
-        return output.transpose(0, 1)
+        return output
 
 
 class Wav2VecEncoder(FairseqEncoder):
