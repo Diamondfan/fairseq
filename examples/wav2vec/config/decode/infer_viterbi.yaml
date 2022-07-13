@@ -1,0 +1,31 @@
+# @package _group_
+
+defaults:
+  - model: null
+
+hydra:
+  run:
+    dir: ${common_eval.results_path}/viterbi
+  sweep:
+    dir: ${common_eval.results_path}
+    subdir: viterbi
+
+task:
+  _name: audio_finetuning
+  single_target: true
+  fine_tuning: true
+  data: ???
+  normalize: ???
+  labels: ???
+
+decoding:
+  type: viterbi
+  unique_wer_file: true
+common_eval:
+  results_path: ???
+  path: ???
+  post_process: letter
+dataset:
+  max_tokens: 2400000  #150s
+  gen_subset: ???
+  batch_size: 1

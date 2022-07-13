@@ -83,6 +83,11 @@ class S2TDataConfig(object):
         return self.config.get("prepend_tgt_lang_tag", False)
 
     @property
+    def prepend_bos_and_append_tgt_lang_tag(self) -> bool:
+        """Prepend BOS and append target lang ID token to the target (e.g. mBART with language token pretraining)."""
+        return self.config.get("prepend_bos_and_append_tgt_lang_tag", False)
+
+    @property
     def input_feat_per_channel(self):
         """The dimension of input features (per audio channel)"""
         return self.config.get("input_feat_per_channel", 80)
@@ -107,6 +112,9 @@ class S2TDataConfig(object):
         """Needed by the dataset loader to see if the model requires
         raw audio as inputs."""
         return self.config.get("use_audio_input", False)
+
+    def standardize_audio(self) -> bool:
+        return self.use_audio_input and self.config.get("standardize_audio", False)
 
     @property
     def use_sample_rate(self):
@@ -155,7 +163,8 @@ class S2SDataConfig(S2TDataConfig):
 
     @property
     def vocab_filename(self):
-        return None
+        """fairseq vocabulary file under data root"""
+        return self.config.get("vocab_filename", None)
 
     @property
     def pre_tokenizer(self) -> Dict:
@@ -187,6 +196,11 @@ class S2SDataConfig(S2TDataConfig):
     def target_speaker_embed(self):
         """Target speaker embedding file (one line per target audio sample)"""
         return self.config.get("target_speaker_embed", None)
+
+    @property
+    def prepend_tgt_lang_tag_as_bos(self) -> bool:
+        """Prepend target lang ID token as the target BOS."""
+        return self.config.get("prepend_tgt_lang_tag_as_bos", False)
 
 
 class MultitaskConfig(object):

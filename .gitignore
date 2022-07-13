@@ -134,5 +134,8 @@ experimental/*
 
 # Weights and Biases logs
 wandb/
-/examples/hubert/*
-/examples/wav2vec/*
+
+# Hydra artifacts
+nohup.out
+multirun
+outputs

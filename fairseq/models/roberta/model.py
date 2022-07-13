@@ -202,6 +202,20 @@ class RobertaModel(FairseqEncoderModel):
             default=0.0,
             help="scaling factor for regularization term in adptive pruning, recommendation is 0.000375",
         )
+        parser.add_argument(
+            "--mha-heads-to-keep",
+            type=int,
+            metavar="D",
+            default=-1,
+            help="number of heads to keep in each multi-head attention module, -1 means keeping all heads",
+        )
+        parser.add_argument(
+            "--ffn-blocks-to-remove",
+            type=int,
+            metavar="D",
+            default=-1,
+            help="number of feedforward blocks to remove in each transformer layer, -1 means keeping all ffn blocks",
+        )
 
     @classmethod
     def build_model(cls, args, task):
@@ -438,6 +452,19 @@ class RobertaModel(FairseqEncoderModel):
                 if prefix + "classification_heads." + k not in state_dict:
                     logger.info("Overwriting " + prefix + "classification_heads." + k)
                     state_dict[prefix + "classification_heads." + k] = v
+
+            # adapt data2vec models
+            if (
+                "encoder._ema" in state_dict
+                and "encoder.lm_head.weight" not in state_dict
+            ):
+                lm_state = self.encoder.lm_head.state_dict()
+                for k, v in lm_state.items():
+                    state_dict["encoder.lm_head." + k] = v
+
+            for k in list(state_dict.keys()):
+                if k.startswith("encoder.regression_head") or k == "encoder._ema":
+                    del state_dict[k]
 
 
 class RobertaLMHead(nn.Module):

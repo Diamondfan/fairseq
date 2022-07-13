@@ -5,11 +5,13 @@
 
 import contextlib
 from argparse import Namespace
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
 import torch.nn as nn
-from dataclasses import dataclass, field
+from omegaconf import II, MISSING
+
 from fairseq import checkpoint_utils, tasks, utils
 from fairseq.dataclass import FairseqDataclass
 from fairseq.dataclass.utils import convert_namespace_to_omegaconf
@@ -17,7 +19,6 @@ from fairseq.models import BaseFairseqModel, FairseqEncoder, register_model
 from fairseq.models.hubert.hubert import MASKING_DISTRIBUTION_CHOICES
 from fairseq.modules import LayerNorm
 from fairseq.tasks import FairseqTask
-from omegaconf import II, MISSING
 
 
 @dataclass
@@ -189,7 +190,7 @@ class HubertCtc(BaseFairseqModel):
     @classmethod
     def build_model(cls, cfg: HubertCtcConfig, task: FairseqTask):
         """Build a new model instance."""
-        w2v_encoder = HubertEncoder(cfg, task.target_dictionary)
+        w2v_encoder = HubertEncoder(cfg, task)
         return cls(cfg, w2v_encoder)
 
     def get_normalized_probs(self, net_output, log_probs):
@@ -335,7 +336,7 @@ class LSTMGenerator(nn.Module):
 
 
 class HubertEncoder(FairseqEncoder):
-    def __init__(self, cfg: HubertAsrConfig, tgt_dict=None):
+    def __init__(self, cfg: HubertAsrConfig, task):
         self.apply_mask = cfg.apply_mask
 
         arg_overrides = {
@@ -381,13 +382,20 @@ class HubertEncoder(FairseqEncoder):
         )
 
         w2v_args.task.data = cfg.data
-        task = tasks.setup_task(w2v_args.task)
+        pretrain_task = tasks.setup_task(w2v_args.task)
         if state is not None and "task_state" in state:
             # This will load the stored "dictionaries" object
+<<<<<<< HEAD
             task.load_state_dict(state["task_state"])
         w2v_args.model.no_pretrained_weights = True
         model = task.build_model(w2v_args.model)
+=======
+            pretrain_task.load_state_dict(state["task_state"])
+        else:
+            pretrain_task.load_state_dict(task.state_dict())
+>>>>>>> origin/main
 
+        model = pretrain_task.build_model(w2v_args.model, from_checkpoint=True)
         if state is not None and not cfg.no_pretrained_weights:
             print("load pretrained hubert model from {}".format(cfg.w2v_path))
             # set strict=False because we omit some modules
@@ -395,7 +403,7 @@ class HubertEncoder(FairseqEncoder):
 
         model.remove_pretraining_modules()
 
-        super().__init__(task.source_dictionary)
+        super().__init__(pretrain_task.source_dictionary)
 
         d = w2v_args.model.encoder_embed_dim
 
@@ -405,9 +413,14 @@ class HubertEncoder(FairseqEncoder):
         self.freeze_finetune_updates = cfg.freeze_finetune_updates
         self.num_updates = 0
 
+<<<<<<< HEAD
         if tgt_dict is not None:
             targ_d = len(tgt_dict)
             #self.proj = Linear(d, len(tgt_dict))
+=======
+        if task.target_dictionary is not None:
+            self.proj = Linear(d, len(task.target_dictionary))
+>>>>>>> origin/main
         elif getattr(cfg, "decoder_embed_dim", d) != d:
             targ_d = cfg.decoder_embed_dim
             #self.proj = Linear(d, cfg.decoder_embed_dim)
@@ -479,7 +492,7 @@ class HubertEncoder(FairseqEncoder):
 
 def Embedding(num_embeddings, embedding_dim, padding_idx):
     m = nn.Embedding(num_embeddings, embedding_dim, padding_idx=padding_idx)
-    nn.init.normal_(m.weight, mean=0, std=embedding_dim ** -0.5)
+    nn.init.normal_(m.weight, mean=0, std=embedding_dim**-0.5)
     nn.init.constant_(m.weight[padding_idx], 0)
     return m
 

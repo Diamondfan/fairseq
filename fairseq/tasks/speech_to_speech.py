@@ -3,21 +3,22 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-from argparse import Namespace
 import json
 import logging
 import math
+from argparse import Namespace
 from pathlib import Path
+
 import torch
 import torch.nn as nn
 
 from fairseq import utils
 from fairseq.data import Dictionary
-from fairseq.data.audio.data_cfg import S2SDataConfig, MultitaskConfig
+from fairseq.data.audio.data_cfg import MultitaskConfig, S2SDataConfig
 from fairseq.data.audio.speech_to_speech_dataset import SpeechToSpeechDatasetCreator
+from fairseq.data.audio.speech_to_text_dataset import SpeechToTextDataset
 from fairseq.tasks import LegacyFairseqTask, register_task
 from fairseq.tasks.text_to_speech import batch_mel_cepstral_distortion
-
 
 logger = logging.getLogger(__name__)
 
@@ -196,13 +197,19 @@ class SpeechToSpeechTask(LegacyFairseqTask):
             choices=["griffin_lim", "hifigan", "code_hifigan"],
         )
         parser.add_argument("--spec-bwd-max-iter", type=int, default=8)
+        parser.add_argument(
+            "--infer-target-lang",
+            type=str,
+            default="",
+            help="target language for inference",
+        )
 
-    def __init__(self, args, tgt_dict):
+    def __init__(self, args, tgt_dict, infer_tgt_lang_id=None):
         super().__init__(args)
         self.tgt_dict = tgt_dict
         self.data_cfg = S2SDataConfig(Path(args.data) / args.config_yaml)
         self.multitask_tasks = {}
-        if args.multitask_config_yaml:
+        if getattr(args, "multitask_config_yaml", None) is not None:
             multitask_cfg = MultitaskConfig(
                 Path(args.data) / args.multitask_config_yaml
             )
@@ -210,16 +217,36 @@ class SpeechToSpeechTask(LegacyFairseqTask):
                 self.multitask_tasks[task_name] = DummyMultiTask(
                     task_config, task_config.tgt_dict
                 )
+        self._infer_tgt_lang_id = infer_tgt_lang_id
 
     @classmethod
     def setup_task(cls, args, **kwargs):
+        data_cfg = data_cfg = S2SDataConfig(Path(args.data) / args.config_yaml)
         tgt_dict = None
+        infer_tgt_lang_id = None
         if args.target_is_code:
-            assert args.target_code_size is not None
+            if data_cfg.prepend_tgt_lang_tag_as_bos:
+                # dictionary with language tags
+                dict_path = Path(args.data) / data_cfg.vocab_filename
+                if not dict_path.is_file():
+                    raise FileNotFoundError(
+                        f"Dict has to be provided when setting prepend_tgt_lang_tag_as_bos: true, but dict not found: {dict_path}"
+                    )
+                tgt_dict = Dictionary.load(dict_path.as_posix())
 
-            tgt_dict = Dictionary()
-            for i in range(args.target_code_size):
-                tgt_dict.add_symbol(str(i))
+                # target langauge for inference
+                if args.infer_target_lang != "":
+                    tgt_lang_tag = SpeechToTextDataset.LANG_TAG_TEMPLATE.format(
+                        args.infer_target_lang
+                    )
+                    infer_tgt_lang_id = tgt_dict.index(tgt_lang_tag)
+                    assert infer_tgt_lang_id != tgt_dict.unk()
+            else:
+                assert args.target_code_size is not None
+
+                tgt_dict = Dictionary()
+                for i in range(args.target_code_size):
+                    tgt_dict.add_symbol(str(i))
             logger.info(f"dictionary size: " f"{len(tgt_dict):,}")
 
         if getattr(args, "train_subset", None) is not None:
@@ -233,7 +260,7 @@ class SpeechToSpeechTask(LegacyFairseqTask):
             or (not args.target_is_code and args.vocoder != "code_hifigan")
         )
 
-        return cls(args, tgt_dict)
+        return cls(args, tgt_dict, infer_tgt_lang_id=infer_tgt_lang_id)
 
     def build_criterion(self, args):
         from fairseq import criterions
@@ -275,13 +302,13 @@ class SpeechToSpeechTask(LegacyFairseqTask):
     def max_positions(self):
         return self.args.max_source_positions, self.args.max_target_positions
 
-    def build_model(self, args):
+    def build_model(self, args, from_checkpoint=False):
         args.input_feat_per_channel = self.data_cfg.input_feat_per_channel
         args.input_channels = self.data_cfg.input_transformed_channels
         args.target_speaker_embed = self.data_cfg.target_speaker_embed is not None
         args.n_frames_per_step = self.args.n_frames_per_step
 
-        model = super().build_model(args)
+        model = super().build_model(args, from_checkpoint)
 
         if len(self.multitask_tasks) > 0:
             from fairseq.models.speech_to_speech.s2s_transformer import (
@@ -432,6 +459,27 @@ class SpeechToSpeechTask(LegacyFairseqTask):
         ]
 
         return hypos, losses
+
+    def inference_step(
+        self, generator, models, sample, prefix_tokens=None, constraints=None
+    ):
+        with torch.no_grad():
+            if self._infer_tgt_lang_id is not None:
+                return generator.generate(
+                    models,
+                    sample,
+                    prefix_tokens=prefix_tokens,
+                    constraints=constraints,
+                    bos_token=self._infer_tgt_lang_id,
+                )
+            else:
+                return super().inference_step(
+                    generator,
+                    models,
+                    sample,
+                    prefix_tokens=prefix_tokens,
+                    constraints=constraints,
+                )
 
 
 class DummyMultiTask(LegacyFairseqTask):
