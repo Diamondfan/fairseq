@@ -2,14 +2,14 @@
 #train
 
 stage=1
-end_stage=2
+end_stage=1
 
-kaldi_data_style_dir=/data/ruchao/workdir/SSLASR/egs/MyST/data/
+kaldi_data_style_dir=/data/ruchao/workdir/cassnat_asr/egs/MyST/data/
 
 if [ $stage -le 1 ] && [ $end_stage -ge 1 ]; then
   echo "prepare wav.tsv!"
   [ ! -d myst_data ] && mkdir -p myst_data
-  for tset in train_sp; do #development test; do
+  for tset in train train_wotrn; do #development test train_sp; do
     echo $tset
     wav_scp=$kaldi_data_style_dir/$tset/wav.scp
     wav_dir=myst_data/wav/$tset/
@@ -31,10 +31,11 @@ if [ $stage -le 2 ] && [ $end_stage -ge 2 ]; then
   echo "prepare label for CTC finetuning"
   
   for tset in train_sp development test; do
+    echo "Processing $tset ...."
     text_scp=$kaldi_data_style_dir/$tset/token_char.scp
     cat $text_scp | cut -d" " -f2- > myst_data/$tset.ltr
   done
 
-  cat $kaldi_data_style_dir/dict/vocab_char.txt | awk '{print $1" 1" }' > myst_data/dict.ltr.txt
+  #cat $kaldi_data_style_dir/dict/vocab_char.txt | awk '{print $1" 1" }' > myst_data/dict.ltr.txt
 fi
 

@@ -23,7 +23,7 @@ decoding:
   lmpath: ???
   beamthreshold: 100
   beam: 500
-  lmweight: 2
+  lmweight: 2.0
   wordscore: -1
   silweight: 0
   unique_wer_file: true
@@ -32,5 +32,6 @@ common_eval:
   path: ???
   post_process: letter
 dataset:
-  max_tokens: 1100000
+  max_tokens: 2400000
   gen_subset: ???
+  batch_size: 1

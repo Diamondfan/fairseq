@@ -222,7 +222,7 @@ class Wav2Vec2AsrConfig(FairseqDataclass):
     lstm_add_norm: bool = field(
         default=False, metadata={"help": "use layer norm in final layer or not"}
     )
-    lstm_add_prob: bool = field(
+    lstm_add_proj: bool = field(
         default=False, metadata={"help": "add proj in final lstm module or not"}
     )
     lstm_dropout: float = field(
@@ -430,7 +430,7 @@ class LSTMGenerator(nn.Module):
         bidirection = cfg.lstm_bidirection
         module = cfg.lstm_module
         add_norm = cfg.lstm_add_norm
-        add_proj = cfg.lstm_add_prob
+        add_proj = cfg.lstm_add_proj
         dropout = cfg.lstm_dropout
 
         self.layers = nn.ModuleList()
@@ -512,7 +512,12 @@ class Wav2VecEncoder(FairseqEncoder):
                 w2v_args.model.checkpoint_activations = cfg.checkpoint_activations
 
         w2v_args.task.data = cfg.data
-        w2v_args.model.no_pretrained_weights = True
+        if hasattr(w2v_args.model, "no_pretrained_weights"):
+            w2v_args.model.no_pretrained_weights = True
+
+        if hasattr(w2v_args.model, "uda_style_freeze"):
+            w2v_args.model.uda_style_freeze = False
+
         task = tasks.setup_task(w2v_args.task)
         model = task.build_model(w2v_args.model, from_checkpoint=True)
 

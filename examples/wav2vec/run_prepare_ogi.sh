@@ -2,7 +2,7 @@
 #train
 
 stage=1
-end_stage=1
+end_stage=2
 
 kaldi_data_style_dir=/data/ruchao/workdir/SSLASR/egs/OGI/data/
 

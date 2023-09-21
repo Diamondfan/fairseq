@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import editdistance
 import torch
 import torch.distributed as dist
+sys.path.append("/data/ruchao/workdir/fairseq")
 from examples.speech_recognition.new.decoders.decoder_config import (
     DecoderConfig,
     FlashlightDecoderConfig,

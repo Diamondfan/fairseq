@@ -239,6 +239,10 @@ class HubertConfig(FairseqDataclass):
         default=False,
         metadata={"help": "freeze backbone parameters or not"},
     )
+    uda_style_freeze: bool = field(
+        default=False,
+        metadata={"help": "freeze context encoder, and updates conv encoder"},
+    )
     no_pretrained_weights: bool = field(
         default=True,
         metadata={"help": "load pretrained wav2vec2 model"},
@@ -365,15 +369,20 @@ class HubertModel(BaseFairseqModel):
             nn.init.uniform_(self.label_embs_concat)
 
         # Add init to prevent nan for inserted residual adapters
-        for p in self.parameters():
-            if p.dim() > 1: 
-                nn.init.xavier_uniform_(p)
+        if cfg.bottleneck_dim > 0:
+            for p in self.parameters():
+                if p.dim() > 1: 
+                    nn.init.xavier_uniform_(p)
 
         self.load_pretrained_weights(cfg)
         if cfg.freeze_adapter:
             self.freeze_adapter()
         if cfg.freeze_backbone:
             self.freeze_backbone()
+
+        self.uda_style_freeze = cfg.uda_style_freeze
+        if cfg.uda_style_freeze:
+            self.freeze_uda_style()
 
     def load_pretrained_weights(self, cfg):
         if not cfg.no_pretrained_weights:
@@ -392,6 +401,15 @@ class HubertModel(BaseFairseqModel):
             if not name.startswith('res_adapter') and not name.startswith('encoder'):
                 p.requires_grad = False
             if name.startswith('label_embs_concat') or name.startswith("target_glu") or name.startswith("final_proj"):
+                p.requires_grad = True
+
+        self.encoder.freeze_backbone()
+
+    def freeze_uda_style(self):
+        for name, p in self.named_parameters():
+            if not name.startswith('feature_extractor'):
+                p.requires_grad = False
+            else:
                 p.requires_grad = True
 
         self.encoder.freeze_backbone()
@@ -542,6 +560,7 @@ class HubertModel(BaseFairseqModel):
         # x: (B, T, D), float
         # padding_mask: (B, T), bool
         # mask_indices: (B, T), bool
+    
         x, _ = self.encoder(
             x,
             padding_mask=padding_mask,

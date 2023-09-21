@@ -6,6 +6,8 @@ common:
   log_interval: 200
 
 checkpoint:
+  save_interval: 5
+  keep_interval_updates: 1
   no_epoch_checkpoints: true
   best_checkpoint_metric: wer
 
@@ -15,6 +17,11 @@ task:
   normalize: false
   labels: ltr
   min_sample_size: 8000     # 0.5s
+
+distributed_training:
+  ddp_backend: legacy_ddp
+  distributed_world_size: 1
+  #nprocs_per_node: 8  
 
 dataset:
   num_workers: 2
@@ -26,10 +33,7 @@ dataset:
   valid_subset: development
   batch_size: 16
 
-distributed_training:
-  ddp_backend: legacy_ddp
-  distributed_world_size: 1
-  #nprocs_per_node: 8  
+
 
 criterion:
   _name: ctc
@@ -69,7 +73,7 @@ model:
   use_first_adapter: ???
   adapter_before_quant: ???
 
-  final_layer_type: "LSTM"
+  final_layer_type: "Linear"
   lstm_dim: 1024
   lstm_num_layer: 2
   lstm_bidirection: True

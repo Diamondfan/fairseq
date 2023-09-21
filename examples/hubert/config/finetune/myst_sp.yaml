@@ -4,8 +4,7 @@ common:
   fp16: true
   log_format: json
   log_interval: 200
-  #tensorboard_logdir: tblog
-  #seed: 1337
+  seed: 1337
 
 checkpoint:
   save_interval: 5
@@ -15,10 +14,7 @@ checkpoint:
 
 distributed_training:
   ddp_backend: legacy_ddp
-  find_unused_parameters: true
-  distributed_world_size: 1
-  #distributed_port: 29671
-  #nprocs_per_node: 8
+  distributed_world_size: 2
 
 task:
   _name: hubert_pretraining
@@ -29,24 +25,24 @@ task:
   labels: ["ltr"]
   single_target: true
   pad_audio: true
-  min_sample_size: 0
+  max_keep_size: 1280000
+  min_sample_size: 8000
 
 dataset:
-  num_workers: 0
-  max_tokens: 3200000
+  num_workers: 6
+  max_tokens: 1600000
   validate_after_updates: ${model.freeze_finetune_updates}
   validate_interval: 5
   train_subset: train_sp
-  valid_subset: dev
-  batch_size: 16
+  valid_subset: development
 
 criterion:
   _name: ctc
   zero_infinity: true
 
 optimization:
-  max_update: 40000
-  lr: [7e-5]
+  max_update: 160000
+  lr: [5e-5]
   sentence_avg: true
   update_freq: [4]
 
@@ -57,9 +53,7 @@ optimizer:
 
 lr_scheduler:
   _name: tri_stage
-  warmup_steps: 4000
-  hold_steps: 16000
-  decay_steps: 20000
+  phase_ratio: [0.1, 0.4, 0.5]
   final_lr_scale: 0.05
 
 model:
@@ -69,7 +63,7 @@ model:
   mask_selection: static
   mask_length: 10
   mask_other: 0
-  mask_prob: 0.75
+  mask_prob: 0.65
   mask_channel_selection: static
   mask_channel_length: 64
   mask_channel_other: 0
@@ -83,18 +77,9 @@ model:
   bottleneck_dim: ???
   freeze_adapter: ???
   freeze_backbone: ???
-  no_pretrained_weights: false    
+  no_pretrained_weights: ???    
   use_first_adapter: ???
   adapter_before_quant: ???
-
-  final_layer_type: "Linear"
-  lstm_dim: 1024
-  lstm_num_layer: 2
-  lstm_bidirection: True
-  lstm_module: "lstm"
-  lstm_add_norm: False
-  lstm_add_proj: False
-  lstm_dropout: 0.2
 
 hydra:
   job:

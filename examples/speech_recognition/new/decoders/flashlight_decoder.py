@@ -58,6 +58,7 @@ class KenLMDecoder(BaseDecoder):
         self.unitlm = cfg.unitlm
 
         if cfg.lexicon:
+            print(cfg.lexicon)
             self.lexicon = load_words(cfg.lexicon)
             self.word_dict = create_word_dict(self.lexicon)
             self.unk_word = self.word_dict.get_index("<unk>")

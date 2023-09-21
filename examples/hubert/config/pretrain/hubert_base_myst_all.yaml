@@ -12,11 +12,10 @@ checkpoint:
   keep_interval_updates: 1
   no_epoch_checkpoints: true
 
-
 distributed_training:
   ddp_backend: no_c10d
   distributed_backend: 'nccl'
-  distributed_world_size: 32
+  distributed_world_size: 4
   #distributed_port: 29671
   nprocs_per_node: 8
   find_unused_parameters: true
@@ -36,10 +35,12 @@ task:
 
 dataset:
   num_workers: 6
-  max_tokens: 1400000
+  max_tokens: 1200000
   skip_invalid_size_inputs_valid_test: true
   validate_interval: 5
   validate_interval_updates: 10000
+  train_subset: train_all_ts16000
+  valid_subset: development
 
 criterion:
   _name: hubert
@@ -49,8 +50,9 @@ criterion:
 
 optimization:
   max_update: 400000
-  lr: [0.0005]
+  lr: [0.0004]
   clip_norm: 10.0
+  update_freq: [4]
 
 optimizer:
   _name: adam
@@ -79,6 +81,14 @@ model:
   feature_grad_mult: 0.1
   untie_final_proj: true
   activation_dropout: 0.0
+  bottleneck_dim: ???
+  freeze_adapter: ???
+  freeze_backbone: ???
+  pretrained_weights_path: ???
+  no_pretrained_weights: ???
+  use_first_adapter: ???
+  adapter_before_quant: ???  
+
 
 hydra:
   job:

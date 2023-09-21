@@ -385,17 +385,18 @@ class HubertEncoder(FairseqEncoder):
         pretrain_task = tasks.setup_task(w2v_args.task)
         if state is not None and "task_state" in state:
             # This will load the stored "dictionaries" object
-<<<<<<< HEAD
-            task.load_state_dict(state["task_state"])
-        w2v_args.model.no_pretrained_weights = True
-        model = task.build_model(w2v_args.model)
-=======
             pretrain_task.load_state_dict(state["task_state"])
         else:
             pretrain_task.load_state_dict(task.state_dict())
->>>>>>> origin/main
+
+        if hasattr(w2v_args.model, "no_pretrained_weights"):
+            w2v_args.model.no_pretrained_weights = True
+
+        if hasattr(w2v_args.model, "uda_style_freeze"):
+            w2v_args.model.uda_style_freeze = False
 
         model = pretrain_task.build_model(w2v_args.model, from_checkpoint=True)
+
         if state is not None and not cfg.no_pretrained_weights:
             print("load pretrained hubert model from {}".format(cfg.w2v_path))
             # set strict=False because we omit some modules
@@ -413,20 +414,13 @@ class HubertEncoder(FairseqEncoder):
         self.freeze_finetune_updates = cfg.freeze_finetune_updates
         self.num_updates = 0
 
-<<<<<<< HEAD
-        if tgt_dict is not None:
-            targ_d = len(tgt_dict)
-            #self.proj = Linear(d, len(tgt_dict))
-=======
+            
         if task.target_dictionary is not None:
-            self.proj = Linear(d, len(task.target_dictionary))
->>>>>>> origin/main
+            targ_d = len(task.target_dictionary)
         elif getattr(cfg, "decoder_embed_dim", d) != d:
             targ_d = cfg.decoder_embed_dim
-            #self.proj = Linear(d, cfg.decoder_embed_dim)
         else:
             targ_d = None
-            #self.proj = None
 
         if targ_d is not None:
             if cfg.final_layer_type == "Linear":
