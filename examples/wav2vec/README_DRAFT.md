@@ -3,13 +3,13 @@
 Code and scripts to run domain responsible adaptation and finetuning for Wav2vec2.0. The similar operations can be applied to HuBERT.
 
 ## The three-stage DRAFT training:
-1. Pre-training with source domain data with Wav2vec2.0 loss, which is typically opensourced and can be used directly. In our case, we use the Wav2vec2.0-Base pretrained with Librispeech 960 hours data [download](https://dl.fbaipublicfiles.com/fairseq/wav2vec/wav2vec_small.pt).
-2. Domain responsible adaptation: Continual pre-training with target domain data with Wav2vec2.0 loss. Residual adapters are added after each layer in encoder for efficient contiual learning while freezing the other modules of the encoder.
-3. Domain responsible finetuning: Full finetuning the encoder and residual adapters with the taget domain data and an ASR loss.
+1. Pre-training with source domain data and the Wav2vec2.0 loss, which is typically opensourced and can be used directly. In our case, we use the Wav2vec2.0-Base model pretrained with Librispeech 960 hours data [download](https://dl.fbaipublicfiles.com/fairseq/wav2vec/wav2vec_small.pt).
+2. Domain responsible adaptation: Continual pre-training with target domain data and the Wav2vec2.0 loss. Residual adapters are added after each layer in encoder for efficient contiual learning while other modules of the encoder are freezed.
+3. Domain responsible finetuning: Full finetuning of the encoder and residual adapters with the taget domain data and an ASR loss.
 
 ## Usage
 
-DRAFT is built based on Fairseq repo and the examples in Wav2vec2.0 and HuBERT examples.
+DRAFT is built based on Fairseq repo and the examples in Wav2vec2.0 and HuBERT directories.
 
 ### 1. prepare the data
 First, please follow the original README to prepare the data, including wav path and transcript for ASR finetuning. Example: train_clean_100.tsv (each line is the path of audio and its data sample points)
